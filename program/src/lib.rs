@@ -41,13 +41,13 @@ fn process_instruction(
             &instruction_data[1..instruction_data.len()],
         );
     } else if instruction_data[0] == 2 {
-        return set_bet_outcome(
+        return settle_bet_outcome(
             program_id,
             accounts,
             &instruction_data[1..instruction_data.len()],
         );
     } else if instruction_data[0] == 3 {
-        return release_bet_winnings(
+        return release_winnings(
             program_id,
             accounts,
             &instruction_data[1..instruction_data.len()],
@@ -92,15 +92,26 @@ fn initialize_bet(
     }
 
     // We try to deserialize the instruction data into our BetState struct to work with
+    // returns the bet state
     let mut bet_state = BetState::try_from_slice(&instruction_data).expect("Instruction data serialization did not work");
 
     // Make sure that the creator of the bet state is the one who initialized the bet
-    if bet_state.admin != *creator_account.key {
+    if bet_state.creator != *creator_account.key {
         msg!("Invalid instruction data");
         return Err(ProgramError::InvalidInstructionData);
     }
 
-    // get the minimum balance we need in our program account by using the length of our writing program derived account/address
+    if bet_state.name.len() < 5 {
+        msg!("Name of the bet needs to be longer than 5 characters");
+        return Err(ProgramError::InvalidInstructionData);
+    }
+
+    if bet_state.description.len() < 10 {
+        msg!("Description of the bet needs to be longer than 10 characters");
+        return Err(ProgramError::InvalidAccountData);
+    }
+
+    // Get the minimum balance we need in our program account by using the length of our writing program derived account/address
     let rent_exemption = Rent::get()?.minimum_balance(writing_account_pda.data_len());
     
     // And we make sure our program account (`writing_account`) has that much lamports(balance).
@@ -109,11 +120,17 @@ fn initialize_bet(
         return Err(ProgramError::InsufficientFunds);
     }
 
-    // Then we can set the initial pool to be zero.
-    bet_state.total_pool=0;
+    // Then we can set the initial bet state
+    bet_state.total_pool=0; // Initialize an empty total pool to keep track of total funds
+    bet_state.party1_pool=0; // Initialize an empty pool for party 1
+    bet_state.party2_pool=0; // Initialize an empty pool for party 2
+    bet_state.outcome = BetOutcome::new(); // Initalize a fresh unsettled outcome
 
+    // Serialize the bet state struct into a binary format using serialize 
+    //to write that data thats in our writing account
     bet_state.serialize(&mut &mut writing_account_pda.data.borrow_mut()[..])?;
 
+    // Return OK
     Ok(())
 }
 
@@ -122,10 +139,73 @@ fn place_bet_amount(
     accounts: &[AccountInfo],
     instruction_data: &[u8],
 ) -> ProgramResult {
+
+    let accounts_iter = &mut accounts.iter();
+
+    let writing_account_pda = next_account_info(accounts_iter)?;
+
+    let bet_amount_pda = next_account_info(accounts_iter)?;
+
+    let bettor_account_pda = next_account_info(accounts_iter)?;
+
+    let creator_account = next_account_info(accounts_iter)?;
+
+     // We want to write in this account, so we want to make sure its owner is the program itself.
+     if writing_account_pda.owner != program_id {
+        msg!("writing_account_pda isn't owned by the program");
+        return Err(ProgramError::IncorrectProgramId);
+    }
+
+    // Check to see if this transaction was not signed by the bettor_account public key
+    if !creator_account.is_signer {
+        msg!("The creator_account should be the signer of this instruction");
+        return Err(ProgramError::IncorrectProgramId);
+    }
+
+    //grab the data to create the Bettor struct
+    let mut bettor_details = BettorDetails::try_from_slice(&instruction_data).expect("Error deserializing bettor details data");
+
+    // grab the BetState struct out of the writing account's
+    let mut bet_state = BetState::try_from_slice(*writing_account_pda.data.borrow()).expect("Error deserializing the bet state data");
+
+    // get the number of lamports from the bet_aount_pda
+    let bet_amount_in_lamports = bet_amount_pda.lamports();
+
+    // get the minimum balance we need in our program account.
+    // We need this rent exemption to make sure our bettor accounts that get created for each bettor doesnt get dropped
+    let rent_exemption = Rent::get()?.minimum_balance(bettor_account_pda.data_len());
+
+    // And we make sure our program account (`writing_account`) has that much lamports(balance).
+    if **bettor_account_pda.lamports.borrow() < rent_exemption {
+        msg!("The balance of bettor_account should be more than the rent_exemption");
+        return Err(ProgramError::InsufficientFunds);
+    }
+
+
+    //set the bettor_details info
+    bettor_details.value = bet_amount_in_lamports;
+
+    // serialize the bettor_details
+    bettor_details.serialize(&mut &mut bettor_account_pda.data.borrow_mut()[..])?;
+
+    // set the bet_state info
+    bet_state.total_pool += bet_amount_in_lamports;
+    if bettor_details.party1 {
+        bet_state.party1_pool += bet_amount_in_lamports;
+    } else if bettor_details.party2 {
+        bet_state.party2_pool += bet_amount_in_lamports;
+    }
+
+    // move the lamports from bet_amount_account_pda to writing_account_pda BetState
+    **writing_account_pda.try_borrow_mut_lamports()? += **bet_amount_pda.lamports.borrow();
+    **bet_amount_pda.try_borrow_mut_lamports()? = 0;
+
+    bet_state.serialize(&mut &mut writing_account_pda.data.borrow_mut()[..])?;
+
     Ok(())
 }
 
-fn set_bet_outcome(
+fn settle_bet_outcome(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
     instruction_data: &[u8],
@@ -133,7 +213,7 @@ fn set_bet_outcome(
     Ok(())
 }
 
-fn release_bet_winnings(
+fn release_winnings(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
     instruction_data: &[u8],
@@ -141,31 +221,43 @@ fn release_bet_winnings(
     Ok(())
 }
 
+// BetState struct representing the base structure of a bet within the app
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
 struct BetState {
-    pub admin: Pubkey,
+    pub creator: Pubkey,
     pub name: String,
     pub description: String,
-    pub image_link: String,
     pub total_pool: u64,
     pub party1_pool: u64,
-    pub party1_bettors: Vec<Bettor>,
     pub party2_pool: u64,
-    pub party2_bettors: Vec<Bettor>,
-    pub outcome: BetOutcome
-    
+    pub outcome: BetOutcome 
 }
 
+// Bettor struct representing a single bettor
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
-struct Bettor {
-    pub address: Pubkey,
+struct BettorDetails {
+    pub bet_placer_address: Pubkey,
     pub value: u64,
+    pub assoc_bet_address: Pubkey,
+    pub party1: bool,
+    pub party2: bool,
 }
 
+// BetOutcome struct representing the outcome of a bet
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
 struct BetOutcome {
     pub party1_result: bool,
     pub party2_result: bool,
+}
+
+// BetOutcome struct method implementation
+impl BetOutcome {
+    pub fn new() -> Self {
+        Self {
+            party1_result: false,
+            party2_result: false
+        }
+    }
 }
 
 
