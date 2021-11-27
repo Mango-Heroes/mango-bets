@@ -186,8 +186,8 @@ fn place_wager(
 
     // Set the bettor_details info
     bettor_details.value = bet_amount_in_lamports;
-    // **** party 1 and 2 status will be set by the front end solana api code
-    // **** bet placer and assoc bet address will be set by the front end solana api code
+    // TODO: party 1 and 2 status will be set by the front end solana api code
+    // TODO: bet placer and assoc bet address will be set by the front end solana api code
 
     // serialize the bettor_details
     bettor_details.serialize(&mut &mut bettor_account_pda.data.borrow_mut()[..])?;
