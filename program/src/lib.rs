@@ -35,7 +35,7 @@ fn process_instruction(
             &instruction_data[1..instruction_data.len()],
         );
     } else if instruction_data[0] == 1 {
-        return place_bet_amount(
+        return place_wager(
             program_id,
             accounts,
             &instruction_data[1..instruction_data.len()],
@@ -47,7 +47,7 @@ fn process_instruction(
             &instruction_data[1..instruction_data.len()],
         );
     } else if instruction_data[0] == 3 {
-        return release_winnings(
+        return claim_winnings(
             program_id,
             accounts,
             &instruction_data[1..instruction_data.len()],
@@ -65,6 +65,7 @@ fn process_instruction(
 
 entrypoint!(process_instruction);
 
+/// Functionality to create a bet
 fn initialize_bet(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -124,7 +125,7 @@ fn initialize_bet(
     bet_state.total_pool=0; // Initialize an empty total pool to keep track of total funds
     bet_state.party1_pool=0; // Initialize an empty pool for party 1
     bet_state.party2_pool=0; // Initialize an empty pool for party 2
-    bet_state.outcome = BetOutcome::new(); // Initalize a fresh unsettled outcome
+    bet_state.outcome = BetOutcome::new(); // Initialize a fresh unsettled outcome
 
     // Serialize the bet state struct into a binary format using serialize 
     //to write that data thats in our writing account
@@ -134,7 +135,8 @@ fn initialize_bet(
     Ok(())
 }
 
-fn place_bet_amount(
+/// Functionality to place a wager on a bet
+fn place_wager(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
     instruction_data: &[u8],
@@ -144,7 +146,7 @@ fn place_bet_amount(
 
     let writing_account_pda = next_account_info(accounts_iter)?;
 
-    let bet_amount_pda = next_account_info(accounts_iter)?;
+    let wager_amount_pda = next_account_info(accounts_iter)?;
 
     let bettor_account_pda = next_account_info(accounts_iter)?;
 
@@ -169,10 +171,10 @@ fn place_bet_amount(
     let mut bet_state = BetState::try_from_slice(*writing_account_pda.data.borrow()).expect("Error deserializing the bet state data");
 
     // get the number of lamports from the bet_aount_pda
-    let bet_amount_in_lamports = bet_amount_pda.lamports();
+    let bet_amount_in_lamports = wager_amount_pda.lamports();
 
     // get the minimum balance we need in our program account.
-    // We need this rent exemption to make sure our bettor accounts that get created for each bettor doesnt get dropped
+    // We need this rent exemption to make sure our bettor accounts that get created for each bettor doesnt get dropped by Solana
     let rent_exemption = Rent::get()?.minimum_balance(bettor_account_pda.data_len());
 
     // And we make sure our program account (`writing_account`) has that much lamports(balance).
@@ -182,29 +184,29 @@ fn place_bet_amount(
     }
 
 
-    //set the bettor_details info
+    // Set the bettor_details info
     bettor_details.value = bet_amount_in_lamports;
+    // **** party 1 and 2 status will be set by the front end solana api code
+    // **** bet placer and assoc bet address will be set by the front end solana api code
 
     // serialize the bettor_details
     bettor_details.serialize(&mut &mut bettor_account_pda.data.borrow_mut()[..])?;
 
     // set the bet_state info
     bet_state.total_pool += bet_amount_in_lamports;
-    if bettor_details.party1 {
-        bet_state.party1_pool += bet_amount_in_lamports;
-    } else if bettor_details.party2 {
-        bet_state.party2_pool += bet_amount_in_lamports;
-    }
+    if bettor_details.party1 { bet_state.party1_pool += bet_amount_in_lamports; } 
+    if bettor_details.party2 { bet_state.party2_pool += bet_amount_in_lamports; }
 
     // move the lamports from bet_amount_account_pda to writing_account_pda BetState
-    **writing_account_pda.try_borrow_mut_lamports()? += **bet_amount_pda.lamports.borrow();
-    **bet_amount_pda.try_borrow_mut_lamports()? = 0;
+    **writing_account_pda.try_borrow_mut_lamports()? += **wager_amount_pda.lamports.borrow();
+    **wager_amount_pda.try_borrow_mut_lamports()? = 0;
 
     bet_state.serialize(&mut &mut writing_account_pda.data.borrow_mut()[..])?;
 
     Ok(())
 }
 
+/// Functionality to settle a bet with the outcome
 fn settle_bet_outcome(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -213,7 +215,8 @@ fn settle_bet_outcome(
     Ok(())
 }
 
-fn release_winnings(
+/// Functionality for a Bettor to claim their winnings for a particular Bet
+fn claim_winnings(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
     instruction_data: &[u8],
