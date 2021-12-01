@@ -41,12 +41,18 @@ fn process_instruction(
             &instruction_data[1..instruction_data.len()],
         );
     } else if instruction_data[0] == 2 {
-        return settle_bet_outcome(
+        return cancel_wager(
             program_id,
             accounts,
             &instruction_data[1..instruction_data.len()],
         );
     } else if instruction_data[0] == 3 {
+        return settle_bet_outcome(
+            program_id,
+            accounts,
+            &instruction_data[1..instruction_data.len()],
+        );
+    } else if instruction_data[0] == 4 {
         return claim_winnings(
             program_id,
             accounts,
@@ -136,6 +142,7 @@ fn initialize_bet(
 }
 
 /// Functionality to place a wager on a bet
+/// TODO: Implement take rate
 fn place_wager(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -171,7 +178,7 @@ fn place_wager(
     let mut bet_state = BetState::try_from_slice(*writing_account_pda.data.borrow()).expect("Error deserializing the bet state data");
 
     // get the number of lamports from the bet_aount_pda
-    let bet_amount_in_lamports = wager_amount_pda.lamports();
+    let bet_amount_in_lamports = **wager_amount_pda.lamports.borrow();
 
     // get the minimum balance we need in our program account.
     // We need this rent exemption to make sure our bettor accounts that get created for each bettor doesnt get dropped by Solana
@@ -206,6 +213,15 @@ fn place_wager(
     Ok(())
 }
 
+/// Functionality to cancel a wager on a bet
+fn cancel_wager(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+    instruction_data: &[u8],
+) -> ProgramResult {
+    Ok(())
+}
+
 /// Functionality to settle a bet with the outcome
 fn settle_bet_outcome(
     program_id: &Pubkey,
@@ -233,7 +249,12 @@ struct BetState {
     pub total_pool: u64,
     pub party1_pool: u64,
     pub party2_pool: u64,
-    pub outcome: BetOutcome 
+    pub outcome: BetOutcome,
+    // TODO: Add in bet start time and duration to be set by front end, bet end time will be calculated from prior two fields
+    // TODO: Add in bet state status whether its "STARTED", "OPEN", or "CLOSED" (use an enum) based on start and end time
+    // TODO: Add in minimum bet amount???
+    // TODO: FUTURE STATE: A token_mint pubkey field that allows bets in different tokens other than sol
+        // TODO: Potentially separate bet pools representing different token pools: mngo, raydium, mnde, orca, etc
 }
 
 // Bettor struct representing a single bettor
