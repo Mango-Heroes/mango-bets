@@ -219,6 +219,36 @@ fn cancel_wager(
     accounts: &[AccountInfo],
     instruction_data: &[u8],
 ) -> ProgramResult {
+
+    let accounts_iter = &mut accounts.iter();
+    
+    let writing_account_pda = next_account_info(accounts_iter)?;
+
+    let bettor_account_pda = next_account_info(accounts_iter)?;
+
+    let creator_account = next_account_info(accounts_iter)?;
+
+    // We want to write in this account, so we want to make sure its owner is the program itself.
+    if writing_account_pda.owner != program_id {
+        msg!("writing_account_pda isn't owned by the program");
+        return Err(ProgramError::IncorrectProgramId);
+    }
+
+    // Check to see if this transaction was not signed by the bettor_account public key
+    if !creator_account.is_signer {
+        msg!("The creator_account should be the signer of this instruction");
+        return Err(ProgramError::IncorrectProgramId);
+    }
+
+    // Grab the bet state
+
+    // Grab the bettor details
+
+    // store the amount to refund from the bettor details struct
+
+    // 1. Determine the pool to refund from 2. Transfer the lamports from that pool in bet state back to the signer account
+
+
     Ok(())
 }
 
@@ -257,7 +287,7 @@ struct BetState {
         // TODO: Potentially separate bet pools representing different token pools: mngo, raydium, mnde, orca, etc
 }
 
-// Bettor struct representing a single bettor
+// Bettor struct representing a single bettor in a bet state
 #[derive(BorshSerialize, BorshDeserialize, Debug)]
 struct BettorDetails {
     pub bet_placer_address: Pubkey,
